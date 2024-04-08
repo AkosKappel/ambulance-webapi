@@ -3,10 +3,11 @@ package ambulance_wl
 import (
 	"net/http"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"slices"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // Nasledujúci kód je kópiou vygenerovaného a zakomentovaného kódu zo súboru api_ambulance_waiting_list.go
@@ -85,7 +86,11 @@ func (this *implAmbulanceWaitingListAPI) DeleteWaitingListEntry(ctx *gin.Context
 			}, http.StatusNotFound
 		}
 
-		ambulance.WaitingList = append(ambulance.WaitingList[:entryIndx], ambulance.WaitingList[entryIndx+1:]...)
+		if len(ambulance.WaitingList) > 1 {
+			ambulance.WaitingList = append(ambulance.WaitingList[:entryIndx], ambulance.WaitingList[entryIndx+1:]...)
+		} else {
+			ambulance.WaitingList = []WaitingListEntry{}
+		}
 		ambulance.reconcileWaitingList()
 		return ambulance, nil, http.StatusNoContent
 	})

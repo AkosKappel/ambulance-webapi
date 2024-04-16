@@ -8,9 +8,19 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/technologize/otel-go-contrib/otelginmetrics"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 )
 
 func main() {
@@ -25,6 +35,18 @@ func main() {
 	}
 	engine := gin.New()
 	engine.Use(gin.Recovery())
+
+	// setup telemetry
+	initTelemetry()
+
+	// instrument gin engine
+	engine.Use(otelginmetrics.Middleware(
+		"Ambulance WebAPI Service",
+		// Custom attributes
+		otelginmetrics.WithAttributes(func(serverName, route string, request *http.Request) []attribute.KeyValue {
+			return append(otelginmetrics.DefaultAttributes(serverName, route, request))
+		}),
+	))
 
 	corsMiddleware := cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
@@ -44,8 +66,38 @@ func main() {
 		ctx.Next()
 	})
 
+	// metrics endpoint
+	promhandler := promhttp.Handler()
+	engine.Any("/metrics", func(ctx *gin.Context) {
+		promhandler.ServeHTTP(ctx.Writer, ctx.Request)
+	})
+
 	// request routings
 	ambulance_wl.AddRoutes(engine)
 	engine.GET("/openapi", api.HandleOpenApi)
 	engine.Run(":" + port)
+}
+
+// initialize OpenTelemetry instrumentations
+func initTelemetry() error {
+	ctx := context.Background()
+	res, err := resource.New(ctx,
+		resource.WithAttributes(semconv.ServiceNameKey.String("Ambulance WebAPI Service")),
+		resource.WithAttributes(semconv.ServiceNamespaceKey.String("WAC Hospital")),
+		resource.WithSchemaURL(semconv.SchemaURL),
+		resource.WithContainer(),
+	)
+
+	if err != nil {
+		return err
+	}
+
+	metricExporter, err := prometheus.New()
+	if err != nil {
+		return err
+	}
+
+	metricProvider := metric.NewMeterProvider(metric.WithReader(metricExporter), metric.WithResource(res))
+	otel.SetMeterProvider(metricProvider)
+	return nil
 }
